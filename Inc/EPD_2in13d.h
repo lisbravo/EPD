@@ -21,6 +21,7 @@
 // Display resolution
 #define EPD_2IN13D_WIDTH   104
 #define EPD_2IN13D_HEIGHT  212
+#define EPD_2IN13D_FULL_REFRESH  30
 
 #define UC8151D_PSR 0x00
 #define UC8151D_PWR 0x01
@@ -34,8 +35,6 @@
 #define UC8151D_DSP 0x11
 #define UC8151D_DRF 0x12
 #define UC8151D_DTM2 0x13
-
-
 #define UC8151D_AUTO 0x17
 #define UC8151D_LUTOPT 0x2A
 #define UC8151D_PLL 0x30
@@ -64,10 +63,16 @@
 #define UC8151D_LVSEL 0xE4
 #define UC8151D_TSSET 0xE5
 
+static const bool hasFastPartialUpdate = true;
+
+void UC8151D_PowerOn();
+void UC8151D_Init_Full(void);
 void UC8151D_Init(void);
+void UC8151D_InitPart(void);
 void EPD_2IN13D_Clear(void);
 void EPD_2IN13D_Display(UBYTE *Image);
-void EPD_2IN13D_DisplayPart(UBYTE *Image);
+void UC8151D_DisplayPart(UBYTE *Image, uint16_t x, uint16_t y, uint16_t w, uint16_t h);
+void UC8151D_setPartialRamArea(uint16_t x, uint16_t y, uint16_t w, uint16_t h);
 void EPD_2IN13D_Sleep(void);
 
 #endif

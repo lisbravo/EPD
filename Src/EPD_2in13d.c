@@ -15,7 +15,7 @@
 **/
 #include "../Inc/EPD_2in13d.h"
 #include "Debug.h"
-
+#include <stdbool.h>
 /**
  * full screen update LUT
 **/
@@ -66,12 +66,13 @@ static const unsigned char EPD_2IN13D_lut_bb[] = {
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 };
 
-
 /**
  * partial screen update LUT
 **/
+#define Tx19 0x19 // original value is 25 (phase length)
+//#define Tx19 0x20   // new value for test is 32 (phase length)
 static const unsigned char EPD_2IN13D_lut_vcom1[] = {
-    0x00, 0x19, 0x01, 0x00, 0x00, 0x01,
+    0x00, Tx19, 0x01, 0x00, 0x00, 0x01,
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -81,7 +82,7 @@ static const unsigned char EPD_2IN13D_lut_vcom1[] = {
     ,0x00, 0x00,
 };
 static const unsigned char EPD_2IN13D_lut_ww1[] = {
-    0x00, 0x19, 0x01, 0x00, 0x00, 0x01,
+    0x00, Tx19, 0x01, 0x00, 0x00, 0x01,
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -90,7 +91,7 @@ static const unsigned char EPD_2IN13D_lut_ww1[] = {
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 };
 static const unsigned char EPD_2IN13D_lut_bw1[] = {
-    0x80, 0x19, 0x01, 0x00, 0x00, 0x01,
+    0x80, Tx19, 0x01, 0x00, 0x00, 0x01,
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -99,7 +100,7 @@ static const unsigned char EPD_2IN13D_lut_bw1[] = {
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 };
 static const unsigned char EPD_2IN13D_lut_wb1[] = {
-    0x40, 0x19, 0x01, 0x00, 0x00, 0x01,
+    0x40, Tx19, 0x01, 0x00, 0x00, 0x01,
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -108,7 +109,7 @@ static const unsigned char EPD_2IN13D_lut_wb1[] = {
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 };
 static const unsigned char EPD_2IN13D_lut_bb1[] = {
-    0x00, 0x19, 0x01, 0x00, 0x00, 0x01,
+    0x00, Tx19, 0x01, 0x00, 0x00, 0x01,
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -117,6 +118,7 @@ static const unsigned char EPD_2IN13D_lut_bb1[] = {
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 };
 
+bool _power_is_on, _using_partial_mode, _hibernating;
 
 /******************************************************************************
 function :	Software reset
@@ -137,7 +139,7 @@ function :	send command
 parameter:
      Reg : Command register
 ******************************************************************************/
-static void EPD_2IN13D_SendCommand(UBYTE Reg)
+static void UC8151D_SendCommand(uint8_t Reg)
 {
 	EPD_Digital_Write(EPD_CS_PIN, 1);
 	EPD_Digital_Write(EPD_DC_PIN, 0);
@@ -151,7 +153,7 @@ function :	send data
 parameter:
     Data : Write data
 ******************************************************************************/
-static void EPD_2IN13D_SendData(UBYTE Data)
+static void UC8151D_SendData(uint8_t Data)
 {
     EPD_Digital_Write(EPD_DC_PIN, 1);
     EPD_Digital_Write(EPD_CS_PIN, 0);
@@ -166,9 +168,9 @@ parameter:
 static void UC8151D_BusyWait(void)
 {
     Debug("e-Paper busy check\r\n");
-    UBYTE busy;
+    uint8_t busy;
     do {
-        EPD_2IN13D_SendCommand(0x71);
+        UC8151D_SendCommand(0x71);
         busy = EPD_Digital_Read(EPD_BUSY_PIN);
         busy =!(busy & 0x01);
     } while(busy);
@@ -177,76 +179,72 @@ static void UC8151D_BusyWait(void)
 }
 
 /******************************************************************************
-function :	LUT download
+function :	Full LUT download
 parameter:
 ******************************************************************************/
-static void EPD_2IN13D_SetFullReg(void)
+static void UC8151D_SendFullLUT(void)
 {
-    EPD_2IN13D_SendCommand(0X50);			//VCOM AND DATA INTERVAL SETTING
-    EPD_2IN13D_SendData(0xB7);		//WBmode:VBDF 17|D7 VBDW 97 VBDB 57		WBRmode:VBDF F7 VBDW 77 VBDB 37  VBDR B7
+    unsigned int count;
 
-//    unsigned int count;
-//    EPD_2IN13D_SendCommand(0x20);
-//    for(count=0; count<44; count++) {
-//        EPD_2IN13D_SendData(EPD_2IN13D_lut_vcomDC[count]);
-//    }
-//
-//    EPD_2IN13D_SendCommand(0x21);
-//    for(count=0; count<42; count++) {
-//        EPD_2IN13D_SendData(EPD_2IN13D_lut_ww[count]);
-//    }
-//
-//    EPD_2IN13D_SendCommand(0x22);
-//    for(count=0; count<42; count++) {
-//        EPD_2IN13D_SendData(EPD_2IN13D_lut_bw[count]);
-//    }
-//
-//    EPD_2IN13D_SendCommand(0x23);
-//    for(count=0; count<42; count++) {
-//        EPD_2IN13D_SendData(EPD_2IN13D_lut_wb[count]);
-//    }
-//
-//    EPD_2IN13D_SendCommand(0x24);
-//    for(count=0; count<42; count++) {
-//        EPD_2IN13D_SendData(EPD_2IN13D_lut_bb[count]);
-//    }
+    UC8151D_SendCommand(UC8151D_CDI);			//VCOM AND DATA INTERVAL SETTING
+    UC8151D_SendData(0xB7);		//WBmode:VBDF 17|D7 VBDW 97 VBDB 57		WBRmode:VBDF F7 VBDW 77 VBDB 37  VBDR B7
+
+    UC8151D_SendCommand(0x20);
+    for(count=0; count<44; count++) {
+        UC8151D_SendData(EPD_2IN13D_lut_vcomDC[count]);
+    }
+
+    UC8151D_SendCommand(0x21);
+    for(count=0; count<42; count++) {
+        UC8151D_SendData(EPD_2IN13D_lut_ww[count]);
+    }
+
+    UC8151D_SendCommand(0x22);
+    for(count=0; count<42; count++) {
+        UC8151D_SendData(EPD_2IN13D_lut_bw[count]);
+    }
+
+    UC8151D_SendCommand(0x23);
+    for(count=0; count<42; count++) {
+        UC8151D_SendData(EPD_2IN13D_lut_wb[count]);
+    }
+
+    UC8151D_SendCommand(0x24);
+    for(count=0; count<42; count++) {
+        UC8151D_SendData(EPD_2IN13D_lut_bb[count]);
+    }
 }
 
 /******************************************************************************
-function :	LUT download
+function :	Partial LUT download
 parameter:
 ******************************************************************************/
-static void EPD_2IN13D_SetPartReg(void)
+static void UC8151D_SendPartialLUT(void)
 {
-    EPD_2IN13D_SendCommand(0x82);			//vcom_DC setting
-    EPD_2IN13D_SendData(0x00);
-    EPD_2IN13D_SendCommand(0X50);
-    EPD_2IN13D_SendData(0xb7);
-	
     unsigned int count;
-    EPD_2IN13D_SendCommand(0x20);
+    UC8151D_SendCommand(0x20);
     for(count=0; count<44; count++) {
-        EPD_2IN13D_SendData(EPD_2IN13D_lut_vcom1[count]);
+        UC8151D_SendData(EPD_2IN13D_lut_vcom1[count]);
     }
 
-    EPD_2IN13D_SendCommand(0x21);
+    UC8151D_SendCommand(0x21);
     for(count=0; count<42; count++) {
-        EPD_2IN13D_SendData(EPD_2IN13D_lut_ww1[count]);
+        UC8151D_SendData(EPD_2IN13D_lut_ww1[count]);
     }
 
-    EPD_2IN13D_SendCommand(0x22);
+    UC8151D_SendCommand(0x22);
     for(count=0; count<42; count++) {
-        EPD_2IN13D_SendData(EPD_2IN13D_lut_bw1[count]);
+        UC8151D_SendData(EPD_2IN13D_lut_bw1[count]);
     }
 
-    EPD_2IN13D_SendCommand(0x23);
+    UC8151D_SendCommand(0x23);
     for(count=0; count<42; count++) {
-        EPD_2IN13D_SendData(EPD_2IN13D_lut_wb1[count]);
+        UC8151D_SendData(EPD_2IN13D_lut_wb1[count]);
     }
 
-    EPD_2IN13D_SendCommand(0x24);
+    UC8151D_SendCommand(0x24);
     for(count=0; count<42; count++) {
-        EPD_2IN13D_SendData(EPD_2IN13D_lut_bb1[count]);
+        UC8151D_SendData(EPD_2IN13D_lut_bb1[count]);
     }
 }
 
@@ -256,7 +254,7 @@ parameter:
 ******************************************************************************/
 static void UC8151D_DisplayRefresh(void)
 {
-    EPD_2IN13D_SendCommand(UC8151D_DRF);		 //DISPLAY REFRESH
+    UC8151D_SendCommand(UC8151D_DRF);		 //DISPLAY REFRESH
     EPD_Delay_ms(5);     //!!!The delay here is necessary, 200uS at least!!!
 
     UC8151D_BusyWait();
@@ -266,53 +264,69 @@ static void UC8151D_DisplayRefresh(void)
 function :	Initialize the e-Paper register
 parameter:
 ******************************************************************************/
-void UC8151D_Init()
+void UC8151D_PowerOn()
 {
-	EPD_Module_Init();
-
+  if (!_power_is_on)
+  {
+	UC8151D_SendCommand(UC8151D_PON);
+    EPD_Delay_ms(10);
+    UC8151D_BusyWait();
+  }
+  _power_is_on = true;
+}
+void UC8151D_Init_Full()
+{
 	//Reset 3 times
+	//TODO: Implement if (_hibernating) _reset();
 	for (uint8_t var = 0; var < 3; ++var) {
 		EPD_2IN13D_Reset();
 		EPD_Delay_ms(10);
 	}
+	UC8151D_Init();
+	UC8151D_PowerOn();
 
-//    EPD_2IN13D_SendCommand(0x01);	//POWER SETTING
-//    EPD_2IN13D_SendData(0x03);
-//    EPD_2IN13D_SendData(0x00);
-//    EPD_2IN13D_SendData(0x2b);
-//    EPD_2IN13D_SendData(0x2b);
-//    EPD_2IN13D_SendData(0x03);
+}
+void UC8151D_Init()
+{
+	EPD_Module_Init();
 //
-//    EPD_2IN13D_SendCommand(0x06);	//boost soft start
-//    EPD_2IN13D_SendData(0x17);     //A
-//    EPD_2IN13D_SendData(0x17);     //B
-//    EPD_2IN13D_SendData(0x17);     //C
-//
-//    EPD_2IN13D_SendCommand(0x04);
-//    EPD_2IN13D_ReadBusy();
-//
-//    EPD_2IN13D_SendCommand(0x00);	//panel setting
-//    EPD_2IN13D_SendData(0xbf);     //LUT from OTP，128x296
-//    EPD_2IN13D_SendData(0x0e);     //VCOM to 0V fast
-//
-    EPD_2IN13D_SendCommand(UC8151D_PLL);	//PLL setting
-    EPD_2IN13D_SendData(0x3C);     // 3a 100HZ   29 150Hz 39 200HZ	31 171HZ
+    UC8151D_SendCommand(UC8151D_PLL);	//PLL setting
+    UC8151D_SendData(0x3C);     // 3a 100HZ   29 150Hz 39 200HZ	31 171HZ
 
-    EPD_2IN13D_SendCommand(UC8151D_PON);
-    EPD_Delay_ms(10);
-    UC8151D_BusyWait();
-    EPD_2IN13D_SendCommand(UC8151D_PSR);
-    EPD_2IN13D_SendData(0x1F);
- 	EPD_2IN13D_SendCommand(UC8151D_CDI);
- 	EPD_2IN13D_SendData(0x97);
+    UC8151D_PowerOn();
+    UC8151D_SendCommand(UC8151D_PSR);
+    UC8151D_SendData(0xBF);
 
-    EPD_2IN13D_SendCommand(UC8151D_TRES);	//resolution setting
-    EPD_2IN13D_SendData(EPD_2IN13D_WIDTH);
-    EPD_2IN13D_SendData((EPD_2IN13D_HEIGHT >> 8) & 0xff);
-    EPD_2IN13D_SendData(EPD_2IN13D_HEIGHT& 0xff);
+ 	UC8151D_SendCommand(UC8151D_CDI);
+ 	UC8151D_SendData(0xB7);
 
-//    EPD_2IN13D_SendCommand(0x82);	//vcom_DC setting
-//    EPD_2IN13D_SendData(0x28);
+    UC8151D_SendCommand(UC8151D_TRES);	//resolution setting
+    UC8151D_SendData(EPD_2IN13D_WIDTH);
+    UC8151D_SendData((EPD_2IN13D_HEIGHT >> 8) & 0xff);
+    UC8151D_SendData(EPD_2IN13D_HEIGHT& 0xff);
+
+    EPD_2IN13D_Clear();
+
+    _using_partial_mode = false;
+}
+
+/******************************************************************************
+function :	Initialize the e-Paper register in Partial mode
+parameter:
+******************************************************************************/
+void UC8151D_InitPart()
+{
+	//UC8151D_Init();
+	UC8151D_SendCommand(UC8151D_PSR); //panel setting
+	UC8151D_SendData(hasFastPartialUpdate ? 0xbf : 0x1f); // for test with OTP LUT
+	UC8151D_SendCommand(UC8151D_VDCS); //vcom_DC setting
+	UC8151D_SendData (0x08);
+	UC8151D_SendCommand(UC8151D_CDI);
+	UC8151D_SendData(0x17);    //WBmode:VBDF 17|D7 VBDW 97 VBDB 57   WBRmode:VBDF F7 VBDW 77 VBDB 37  VBDR B7
+
+	UC8151D_SendPartialLUT();
+	//UC8151D_PowerOn();
+	_using_partial_mode = true;
 }
 
 /******************************************************************************
@@ -321,21 +335,21 @@ parameter:
 ******************************************************************************/
 void EPD_2IN13D_Clear(void)
 {
-    UWORD Width, Height;
+    uint16_t Width, Height;
     Width = (EPD_2IN13D_WIDTH % 8 == 0)? (EPD_2IN13D_WIDTH / 8 ): (EPD_2IN13D_WIDTH / 8 + 1);
     Height = EPD_2IN13D_HEIGHT;
 
-    EPD_2IN13D_SendCommand(UC8151D_DTM1);
-    for (UWORD j = 0; j < Height; j++) {
-        for (UWORD i = 0; i < Width; i++) {
-            EPD_2IN13D_SendData(0x00);
+    UC8151D_SendCommand(UC8151D_DTM1);
+    for (uint16_t j = 0; j < Height; j++) {
+        for (uint16_t i = 0; i < Width; i++) {
+            UC8151D_SendData(0x00);
         }
     }
 
-    EPD_2IN13D_SendCommand(UC8151D_DTM2);
-    for (UWORD j = 0; j < Height; j++) {
-        for (UWORD i = 0; i < Width; i++) {
-            EPD_2IN13D_SendData(0xFF);
+    UC8151D_SendCommand(UC8151D_DTM2);
+    for (uint16_t j = 0; j < Height; j++) {
+        for (uint16_t i = 0; i < Width; i++) {
+            UC8151D_SendData(0xFF);
         }
     }
 
@@ -347,28 +361,28 @@ void EPD_2IN13D_Clear(void)
 function :	Sends the image buffer in RAM to e-Paper and displays
 parameter:
 ******************************************************************************/
-void EPD_2IN13D_Display(UBYTE *Image)
+void EPD_2IN13D_Display(uint8_t *Image)
 {
-    UWORD Width, Height;
+    uint16_t Width, Height;
     Width = (EPD_2IN13D_WIDTH % 8 == 0)? (EPD_2IN13D_WIDTH / 8 ): (EPD_2IN13D_WIDTH / 8 + 1);
     Height = EPD_2IN13D_HEIGHT;
 
-    EPD_2IN13D_SendCommand(0x10);
-    for (UWORD j = 0; j < Height; j++) {
-        for (UWORD i = 0; i < Width; i++) {
-            EPD_2IN13D_SendData(0x00);
+    if (_using_partial_mode) UC8151D_Init();
+
+    for (uint16_t j = 0; j < Height; j++) {
+        for (uint16_t i = 0; i < Width; i++) {
+            UC8151D_SendData(0x00);
         }
     }
-    // Dev_Delay_ms(10);
 
-    EPD_2IN13D_SendCommand(0x13);
-    for (UWORD j = 0; j < Height; j++) {
-        for (UWORD i = 0; i < Width; i++) {
-            EPD_2IN13D_SendData(Image[i + j * Width]);
+    UC8151D_SendCommand(UC8151D_DTM2);
+    for (uint16_t j = 0; j < Height; j++) {
+        for (uint16_t i = 0; i < Width; i++) {
+            UC8151D_SendData(Image[i + j * Width]);
         }
     }
-    // Dev_Delay_ms(10);
 
+    UC8151D_SendFullLUT();
 	//EPD_2IN13D_SetFullReg();
     UC8151D_DisplayRefresh();
 }
@@ -377,44 +391,64 @@ void EPD_2IN13D_Display(UBYTE *Image)
 function :	Sends the image buffer in RAM to e-Paper and displays
 parameter:
 ******************************************************************************/
-void EPD_2IN13D_DisplayPart(UBYTE *Image)
+void UC8151D_DisplayPart(uint8_t *Image, uint16_t x, uint16_t y, uint16_t w, uint16_t h)
 {
-	UC8151D_Init();
-    /* Set partial Windows */
-    EPD_2IN13D_SetPartReg();
-    EPD_2IN13D_SendCommand(0x91);		//This command makes the display enter partial mode
-    EPD_2IN13D_SendCommand(0x90);		//resolution setting
-    EPD_2IN13D_SendData(0);           //x-start
-    EPD_2IN13D_SendData(EPD_2IN13D_WIDTH - 1);       //x-end
+	if (!_using_partial_mode) UC8151D_InitPart();
 
-    EPD_2IN13D_SendData(0);
-    EPD_2IN13D_SendData(0);     //y-start
-    EPD_2IN13D_SendData(EPD_2IN13D_HEIGHT / 256);
-    EPD_2IN13D_SendData(EPD_2IN13D_HEIGHT % 256 - 1);  //y-end
-    EPD_2IN13D_SendData(0x28);
+	/* Set partial Windows */
+    UC8151D_SendCommand(UC8151D_PTIN);		//This command makes the display enter partial mode
+    UC8151D_setPartialRamArea(y, x, h, w);
 
-    UWORD Width;
-    Width = (EPD_2IN13D_WIDTH % 8 == 0)? (EPD_2IN13D_WIDTH / 8 ): (EPD_2IN13D_WIDTH / 8 + 1);
-    
+    uint16_t bytes_per_column = (EPD_2IN13D_WIDTH % 8 == 0)? (EPD_2IN13D_WIDTH / 8 ): (EPD_2IN13D_WIDTH / 8 + 1);
+
+    //Bytes to draw in direction X
+    h += y % 8;
+    h = (h % 8 == 0)? (h / 8 ): (h / 8 + 1);
+
+    Image = Image + (bytes_per_column * x) + (y/8);
+
     /* send data */
-    EPD_2IN13D_SendCommand(0x10);
-    for (UWORD j = 0; j < EPD_2IN13D_HEIGHT; j++) {
-        for (UWORD i = 0; i < Width; i++) {
-            EPD_2IN13D_SendData(~Image[i + j * Width]);
-        }
-    }
+    UC8151D_SendCommand(0x10);
+	for (uint16_t j = 0; j < w; j++) {
+		for (uint16_t i = 0; i < h; i++) {
+			uint16_t address = i + (j * bytes_per_column);
+			UC8151D_SendData(~Image[address]);
+			//UC8151D_DisplayRefresh();
+			//UC8151D_SendData(0x20);
+		}
+	}
 
-    EPD_2IN13D_SendCommand(0x13);
-    for (UWORD j = 0; j < EPD_2IN13D_HEIGHT; j++) {
-        for (UWORD i = 0; i < Width; i++) {
-            EPD_2IN13D_SendData(Image[i + j * Width]);
-        }
-    }
+	UC8151D_SendCommand(0x13);
+	for (uint16_t j = 0; j < w; j++) {
+		for (uint16_t i = 0; i < h; i++) {
+			UC8151D_SendData(Image[i + (j * bytes_per_column)]);
+			//UC8151D_SendData(~0x20);
+		}
+	}
 
-    /* Set partial refresh */    
     UC8151D_DisplayRefresh();
+    UC8151D_SendCommand(0x92); // partial out
+    EPD_Delay_ms(1); // yield() to avoid WDT on ESP8266 and ESP32
+
 }
 
+void UC8151D_setPartialRamArea(uint16_t x, uint16_t y, uint16_t w, uint16_t h)
+{
+  //w = ((w + 7) / 8) * 8;
+  uint16_t xe = ((x + w) -1 ) | 0x0007; // byte boundary inclusive (last byte)
+  uint16_t ye = y + h - 1;
+  x &= 0xFFF8; // byte boundary
+  //x -= (x % 8);
+  UC8151D_SendCommand(UC8151D_PTL); // partial window
+  UC8151D_SendData(x % 256);
+  UC8151D_SendData(xe % 256);
+  UC8151D_SendData(y / 256);
+  UC8151D_SendData(y % 256);
+  UC8151D_SendData(ye / 256);
+  UC8151D_SendData(ye % 256);
+  UC8151D_SendData(0x01); // don't see any difference
+  //UC8151D_SendData(0x00); // don't see any difference
+}
 
 /******************************************************************************
 function :	Enter sleep mode
@@ -422,12 +456,12 @@ parameter:
 ******************************************************************************/
 void EPD_2IN13D_Sleep(void)
 {
-    EPD_2IN13D_SendCommand(UC8151D_CDI);
-    EPD_2IN13D_SendData(0xf7);
+    UC8151D_SendCommand(UC8151D_CDI);
+    UC8151D_SendData(0xf7);
 
-    EPD_2IN13D_SendCommand(UC8151D_POF);  	//power off
+    UC8151D_SendCommand(UC8151D_POF);  	//power off
     UC8151D_BusyWait();
 
-    EPD_2IN13D_SendCommand(UC8151D_DSLP);  	//deep sleep
-    EPD_2IN13D_SendData(0xA5);
+    UC8151D_SendCommand(UC8151D_DSLP);  	//deep sleep
+    UC8151D_SendData(0xA5);
 }
